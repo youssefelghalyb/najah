@@ -45,7 +45,7 @@ class QrCode extends Model
             if (empty($qrCode->uuid)) {
                 $qrCode->uuid = (string) Str::uuid();
             }
-            
+
             if (empty($qrCode->code)) {
                 $qrCode->code = self::generateUniqueCode();
             }
@@ -69,7 +69,7 @@ class QrCode extends Model
      */
     public function getFullUrlAttribute(): string
     {
-        return "https://qr.najaah.life/{$this->uuid}";
+        return "http://najah.local:8381/{$this->uuid}";
     }
 
     /**
@@ -125,7 +125,7 @@ class QrCode extends Model
         return $query->where('status', 'active')
             ->where(function ($q) {
                 $q->whereNull('expires_at')
-                  ->orWhere('expires_at', '>', now());
+                    ->orWhere('expires_at', '>', now());
             });
     }
 
@@ -143,5 +143,129 @@ class QrCode extends Model
     public function scopeByUser($query, $userId)
     {
         return $query->where('created_by', $userId);
+    }
+
+    /**
+     * Get order items that use this QR code
+     */
+    public function orderItems()
+    {
+        return $this->hasMany(OrderItem::class, 'qr_code_id');
+    }
+
+    /**
+     * Get the order item this QR is assigned to (if any)
+     */
+    public function orderItem()
+    {
+        return $this->hasOne(OrderItem::class, 'qr_code_id');
+    }
+
+    /**
+     * Check if QR code is assigned to an order
+     */
+    public function isAssigned(): bool
+    {
+        return $this->orderItems()->exists();
+    }
+
+    /**
+     * Get the order this QR code belongs to (through order item)
+     */
+    public function order()
+    {
+        return $this->hasOneThrough(
+            Order::class,
+            OrderItem::class,
+            'qr_code_id', // Foreign key on order_items table
+            'id',         // Foreign key on orders table
+            'id',         // Local key on qr_codes table
+            'order_id'    // Local key on order_items table
+        );
+    }
+
+    /**
+     * Get the profile linked to this QR code
+     */
+    public function profile()
+    {
+        return $this->belongsToMany(Profile::class, 'profile_qr_code')
+            ->withPivot('linked_at', 'linked_by', 'notes')
+            ->withTimestamps()
+            ->first();
+    }
+
+    /**
+     * Get all profiles ever linked to this QR code (if you track history)
+     */
+    public function profiles()
+    {
+        return $this->belongsToMany(Profile::class, 'profile_qr_code')
+            ->withPivot('linked_at', 'linked_by', 'notes')
+            ->withTimestamps();
+    }
+
+    /**
+     * Check if QR code has a profile linked
+     */
+    public function hasProfile(): bool
+    {
+        return $this->profiles()->exists();
+    }
+
+    /**
+     * Get the profile linked to this QR code
+     */
+    public function getLinkedProfile()
+    {
+        return $this->profiles()->first();
+    }
+
+    /**
+     * Link QR code to profile
+     */
+    public function linkToProfile(int $profileId, ?int $linkedBy = null, ?string $notes = null): void
+    {
+        // First unlink from any existing profile
+        $this->unlinkFromProfile();
+
+        // Then link to new profile
+        $this->profiles()->attach($profileId, [
+            'linked_at' => now(),
+            'linked_by' => $linkedBy,
+            'notes' => $notes,
+        ]);
+    }
+
+    /**
+     * Unlink QR code from any profile
+     */
+    public function unlinkFromProfile(): void
+    {
+        $this->profiles()->detach();
+    }
+
+    /**
+     * Check if QR code is available for linking (not assigned to order and no profile)
+     */
+    public function isAvailableForLinking(): bool
+    {
+        return !$this->isAssigned() && !$this->hasProfile();
+    }
+
+    /**
+     * Scope for QR codes without profiles
+     */
+    public function scopeWithoutProfile($query)
+    {
+        return $query->whereDoesntHave('profiles');
+    }
+
+    /**
+     * Scope for QR codes with profiles
+     */
+    public function scopeWithProfile($query)
+    {
+        return $query->whereHas('profiles');
     }
 }

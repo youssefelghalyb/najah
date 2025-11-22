@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\BundleController;
+use App\Http\Controllers\Business\ProfileController as BusinessProfileController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProfileController;
@@ -26,37 +27,43 @@ Route::get('/{uuid}', [QrCodeController::class, 'redirect'])
     ->name('qr.redirect')
     ->where('uuid', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
-// Authenticated QR Code Management Routes
-Route::prefix('qr-codes')->name('qr-codes.')->group(function () {
-    // Standard CRUD
-    Route::get('/', [QrCodeController::class, 'index'])->name('index');
-    Route::get('/create', [QrCodeController::class, 'create'])->name('create');
-    Route::post('/', [QrCodeController::class, 'store'])->name('store');
-    Route::get('/{qrCode}', [QrCodeController::class, 'show'])->name('show');
-    Route::get('/{qrCode}/edit', [QrCodeController::class, 'edit'])->name('edit');
-    Route::put('/{qrCode}', [QrCodeController::class, 'update'])->name('update');
-    Route::delete('/{qrCode}', [QrCodeController::class, 'destroy'])->name('destroy');
-    
-    // Bulk Operations
-    Route::get('/bulk/create', [QrCodeController::class, 'bulkCreate'])->name('bulk-create');
-    Route::post('/bulk/store', [QrCodeController::class, 'bulkStore'])->name('bulk-store');
-    Route::get('/bulk/preview', [QrCodeController::class, 'bulkPreview'])->name('bulk-preview');
-    
-    // Export & Download
-    Route::post('/export', [QrCodeController::class, 'export'])->name('export');
-    Route::get('/{qrCode}/download', [QrCodeController::class, 'download'])->name('download');
-    
-    // Bulk Actions
-    Route::post('/bulk/delete', [QrCodeController::class, 'bulkDestroy'])->name('bulk-destroy');
-    
-    // Status Toggle
-    Route::post('/{qrCode}/toggle-status', [QrCodeController::class, 'toggleStatus'])->name('toggle-status');
-});
+
 
 
 
 Route::middleware(['auth'])->group(function () {
-    
+
+    // Authenticated QR Code Management Routes
+    Route::prefix('qr-codes')->name('qr-codes.')->group(function () {
+        // Standard CRUD
+        Route::get('/', [QrCodeController::class, 'index'])->name('index');
+        Route::get('/create', [QrCodeController::class, 'create'])->name('create');
+        Route::post('/', [QrCodeController::class, 'store'])->name('store');
+        Route::get('/{qrCode}', [QrCodeController::class, 'show'])->name('show');
+        Route::get('/{qrCode}/edit', [QrCodeController::class, 'edit'])->name('edit');
+        Route::put('/{qrCode}', [QrCodeController::class, 'update'])->name('update');
+        Route::delete('/{qrCode}', [QrCodeController::class, 'destroy'])->name('destroy');
+
+        // Bulk Operations
+        Route::get('/bulk/create', [QrCodeController::class, 'bulkCreate'])->name('bulk-create');
+        Route::post('/bulk/store', [QrCodeController::class, 'bulkStore'])->name('bulk-store');
+        Route::get('/bulk/preview', [QrCodeController::class, 'bulkPreview'])->name('bulk-preview');
+
+        // Export & Download
+        Route::post('/export', [QrCodeController::class, 'export'])->name('export');
+        Route::get('/{qrCode}/download', [QrCodeController::class, 'download'])->name('download');
+
+        // Bulk Actions
+        Route::post('/bulk/delete', [QrCodeController::class, 'bulkDestroy'])->name('bulk-destroy');
+
+        // Status Toggle
+        Route::post('/{qrCode}/toggle-status', [QrCodeController::class, 'toggleStatus'])->name('toggle-status');
+
+        // QR Code - Profile Management
+        Route::post('/{qrCode}/link-profile', [QrCodeController::class, 'linkProfile'])->name('link-profile');
+        Route::delete('/{qrCode}/unlink-profile', [QrCodeController::class, 'unlinkProfile'])->name('unlink-profile');
+    });
+
     // Products Routes
     Route::prefix('products')->name('products.')->group(function () {
         Route::get('/', [ProductController::class, 'index'])->name('index');
@@ -66,17 +73,17 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/{product}/edit', [ProductController::class, 'edit'])->name('edit');
         Route::put('/{product}', [ProductController::class, 'update'])->name('update');
         Route::delete('/{product}', [ProductController::class, 'destroy'])->name('destroy');
-        
+
         // Additional Product Actions
         Route::post('/{product}/update-stock', [ProductController::class, 'updateStock'])->name('update-stock');
         Route::post('/{product}/delete-gallery-image', [ProductController::class, 'deleteGalleryImage'])->name('delete-gallery-image');
         Route::post('/{product}/duplicate', [ProductController::class, 'duplicate'])->name('duplicate');
-        
+
         // Bulk Actions
         Route::post('/bulk/delete', [ProductController::class, 'bulkDelete'])->name('bulk-delete');
         Route::post('/bulk/update-status', [ProductController::class, 'bulkUpdateStatus'])->name('bulk-update-status');
     });
-    
+
     // Bundles Routes
     Route::prefix('bundles')->name('bundles.')->group(function () {
         Route::get('/', [BundleController::class, 'index'])->name('index');
@@ -86,35 +93,54 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/{bundle}/edit', [BundleController::class, 'edit'])->name('edit');
         Route::put('/{bundle}', [BundleController::class, 'update'])->name('update');
         Route::delete('/{bundle}', [BundleController::class, 'destroy'])->name('destroy');
-        
+
         // Additional Bundle Actions
         Route::post('/{bundle}/delete-gallery-image', [BundleController::class, 'deleteGalleryImage'])->name('delete-gallery-image');
         Route::post('/{bundle}/duplicate', [BundleController::class, 'duplicate'])->name('duplicate');
         Route::post('/{bundle}/recalculate-pricing', [BundleController::class, 'recalculatePricing'])->name('recalculate-pricing');
-        
+
         // Bulk Actions
         Route::post('/bulk/delete', [BundleController::class, 'bulkDelete'])->name('bulk-delete');
         Route::post('/bulk/update-status', [BundleController::class, 'bulkUpdateStatus'])->name('bulk-update-status');
     });
-});
 
 
-Route::middleware(['auth'])->group(function () {
     // Orders CRUD
-    Route::resource('orders', OrderController::class);
-    
-    // QR Code Assignment
-    Route::get('orders/{order}/assign-qr-codes', [OrderController::class, 'assignQRCodesPage'])->name('orders.assign-qr-codes');
-    Route::post('orders/{order}/assign-qr-codes', [OrderController::class, 'assignQRCodes'])->name('orders.assign-qr-codes.store');
-    Route::delete('orders/{order}/unassign-qr-code/{orderItemId}', [OrderController::class, 'unassignQRCode'])->name('orders.unassign-qr-code');
-    
-    // Status Management
-    Route::post('orders/{order}/change-status', [OrderController::class, 'changeStatus'])->name('orders.change-status');
-    Route::post('orders/{order}/update-payment-status', [OrderController::class, 'updatePaymentStatus'])->name('orders.update-payment-status');
+    Route::prefix('orders')->name('orders.')->group(function () {
+        Route::get('/', [OrderController::class, 'index'])->name('index');
+        Route::get('/create', [OrderController::class, 'create'])->name('create');
+        Route::post('/', [OrderController::class, 'store'])->name('store');
+        Route::get('/{order}', [OrderController::class, 'show'])->name('show');
+        Route::get('/{order}/edit', [OrderController::class, 'edit'])->name('edit');
+        Route::put('/{order}', [OrderController::class, 'update'])->name('update');
+        Route::delete('/{order}', [OrderController::class, 'destroy'])->name('destroy');
+        // QR Code Assignment
+        Route::get('/{order}/assign-qr-codes', [OrderController::class, 'assignQRCodesPage'])->name('assign-qr-codes');
+        Route::post('/{order}/assign-qr-codes', [OrderController::class, 'assignQRCodes'])->name('assign-qr-codes.store');
+        Route::delete('/{order}/unassign-qr-code/{orderItemId}', [OrderController::class, 'unassignQRCode'])->name('unassign-qr-code');
+
+        // Status Management
+        Route::post('/{order}/change-status', [OrderController::class, 'changeStatus'])->name('change-status');
+        Route::post('/{order}/update-payment-status', [OrderController::class, 'updatePaymentStatus'])->name('update-payment-status');
+        Route::post('/{order}/update-return-status', [OrderController::class, 'updateReturnStatus'])->name('update-return-status');
+    });
+
+    // Profiles
+    Route::prefix('profiles')->name('profiles.')->group(function () {
+                Route::get('/', [BusinessProfileController::class, 'index'])->name('index');
+        Route::get('/create', [BusinessProfileController::class, 'create'])->name('create');
+        Route::post('/', [BusinessProfileController::class, 'store'])->name('store');
+        Route::get('/{profile}', [BusinessProfileController::class, 'show'])->name('show');
+        Route::get('/{profile}/edit', [BusinessProfileController::class, 'edit'])->name('edit');
+        Route::put('/{profile}', [BusinessProfileController::class, 'update'])->name('update');
+        Route::delete('/{profile}', [BusinessProfileController::class, 'destroy'])->name('destroy');
+        Route::get('/{profile}/manage-qr' , [BusinessProfileController::class, 'manageQrCodes'])->name('manage-qr-codes');
+        
+    });
 });
 
 
 
 
 
-require __DIR__.'/auth.php';
+require __DIR__ . '/auth.php';

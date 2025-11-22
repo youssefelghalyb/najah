@@ -118,9 +118,9 @@
                             <h3 class="text-lg font-bold text-gray-900 mb-2 truncate">{{ $product->name }}</h3>
                             
                             <div class="flex items-baseline gap-2 mb-4">
-                                <span class="text-2xl font-black text-red-600">${{ number_format($product->final_price, 2) }}</span>
+                                <span class="text-2xl font-black text-red-600">EGP{{ number_format($product->final_price, 2) }}</span>
                                 @if($product->hasDiscount())
-                                    <span class="text-sm text-gray-400 line-through">${{ number_format($product->price, 2) }}</span>
+                                    <span class="text-sm text-gray-400 line-through">EGP{{ number_format($product->price, 2) }}</span>
                                     <span class="text-xs font-bold text-green-600">-{{ number_format($product->discount_percentage) }}%</span>
                                 @endif
                             </div>

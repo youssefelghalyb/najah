@@ -16,8 +16,9 @@ class BundleService
     public function create(array $data): Bundle
     {
         return DB::transaction(function () use ($data) {
-            // Extract products before creating bundle
-            $productIds = $data['products'] ?? [];
+            // Extract products and stock quantity before creating bundle
+            $products = $data['products'] ?? [];
+            $bundleQuantity = $data['stock_quantity'] ?? 0;
             unset($data['products']);
 
             // Handle image upload
@@ -39,9 +40,21 @@ class BundleService
             // Create bundle
             $bundle = Bundle::create($data);
 
-            // Attach products
-            if (!empty($productIds)) {
-                $bundle->products()->attach($productIds);
+            // Attach products with quantities
+            if (!empty($products)) {
+                $syncData = [];
+                foreach ($products as $productData) {
+                    $productId = is_array($productData) ? $productData['id'] : $productData;
+                    $quantity = is_array($productData) ? ($productData['quantity'] ?? 1) : 1;
+                    
+                    $syncData[$productId] = ['quantity' => $quantity];
+                }
+                $bundle->products()->sync($syncData);
+            }
+
+            // Deduct stock from products
+            if ($bundleQuantity > 0) {
+                $this->deductProductStock($bundle, $bundleQuantity);
             }
 
             return $bundle->load('products');
@@ -54,13 +67,16 @@ class BundleService
     public function update(Bundle $bundle, array $data): Bundle
     {
         return DB::transaction(function () use ($bundle, $data) {
+            // Get old and new quantities
+            $oldQuantity = $bundle->stock_quantity;
+            $newQuantity = $data['stock_quantity'] ?? $oldQuantity;
+            
             // Extract products before updating
-            $productIds = $data['products'] ?? [];
+            $products = $data['products'] ?? null;
             unset($data['products']);
 
             // Handle image upload
             if (isset($data['image']) && $data['image']) {
-                // Delete old image
                 if ($bundle->image_path) {
                     Storage::disk('public')->delete($bundle->image_path);
                 }
@@ -84,13 +100,102 @@ class BundleService
             // Update bundle
             $bundle->update($data);
 
-            // Sync products
-            if (!empty($productIds)) {
-                $bundle->products()->sync($productIds);
+            // Sync products if provided
+            if ($products !== null) {
+                $oldProducts = $bundle->products()->get();
+                
+                $syncData = [];
+                foreach ($products as $productData) {
+                    $productId = is_array($productData) ? $productData['id'] : $productData;
+                    $quantity = is_array($productData) ? ($productData['quantity'] ?? 1) : 1;
+                    
+                    $syncData[$productId] = ['quantity' => $quantity];
+                }
+                
+                // Return stock from old configuration
+                $this->returnProductStock($bundle, $oldQuantity, $oldProducts);
+                
+                // Sync new products
+                $bundle->products()->sync($syncData);
+                $bundle->load('products');
+                
+                // Deduct stock for new configuration
+                $this->deductProductStock($bundle, $newQuantity);
+            } else {
+                // Only quantity changed, adjust accordingly
+                $difference = $newQuantity - $oldQuantity;
+                
+                if ($difference > 0) {
+                    // Increasing quantity - deduct more
+                    $this->deductProductStock($bundle, $difference);
+                } elseif ($difference < 0) {
+                    // Decreasing quantity - return some
+                    $this->returnProductStock($bundle, abs($difference));
+                }
             }
 
-            return $bundle->load('products');
+            return $bundle->fresh(['products']);
         });
+    }
+
+    /**
+     * Update bundle stock quantity
+     */
+    public function updateStock(Bundle $bundle, int $quantity): Bundle
+    {
+        return DB::transaction(function () use ($bundle, $quantity) {
+            $oldQuantity = $bundle->stock_quantity;
+            $difference = $quantity - $oldQuantity;
+
+            if ($difference > 0) {
+                // Increasing quantity - deduct from products
+                $this->deductProductStock($bundle, $difference);
+            } elseif ($difference < 0) {
+                // Decreasing quantity - return to products
+                $this->returnProductStock($bundle, abs($difference));
+            }
+
+            $bundle->update(['stock_quantity' => $quantity]);
+
+            return $bundle->fresh(['products']);
+        });
+    }
+
+    /**
+     * Deduct product stock when creating/increasing bundle stock
+     */
+    protected function deductProductStock(Bundle $bundle, int $bundleQuantity): void
+    {
+        foreach ($bundle->products as $product) {
+            $requiredQuantity = ($product->pivot->quantity ?? 1) * $bundleQuantity;
+            
+            // Check if enough stock
+            if ($product->stock_quantity < $requiredQuantity) {
+                throw new \Exception(
+                    "Insufficient stock for product '{$product->name}'. " .
+                    "Required: {$requiredQuantity}, Available: {$product->stock_quantity}"
+                );
+            }
+            
+            $product->decrement('stock_quantity', $requiredQuantity);
+            $product->updateStockStatus();
+            $product->save();
+        }
+    }
+
+    /**
+     * Return product stock when decreasing/deleting bundle stock
+     */
+    protected function returnProductStock(Bundle $bundle, int $bundleQuantity, $products = null): void
+    {
+        $products = $products ?? $bundle->products;
+        
+        foreach ($products as $product) {
+            $returnQuantity = ($product->pivot->quantity ?? 1) * $bundleQuantity;
+            $product->increment('stock_quantity', $returnQuantity);
+            $product->updateStockStatus();
+            $product->save();
+        }
     }
 
     /**
@@ -99,6 +204,11 @@ class BundleService
     public function delete(Bundle $bundle): bool
     {
         return DB::transaction(function () use ($bundle) {
+            // Return all stock to products
+            if ($bundle->stock_quantity > 0) {
+                $this->returnProductStock($bundle, $bundle->stock_quantity);
+            }
+
             // Delete images
             if ($bundle->image_path) {
                 Storage::disk('public')->delete($bundle->image_path);
@@ -161,6 +271,7 @@ class BundleService
         return Bundle::whereIn('id', $bundleIds)->update(['status' => $status]);
     }
 
+
     /**
      * Duplicate a bundle
      */
@@ -170,6 +281,7 @@ class BundleService
             $newBundle = $bundle->replicate();
             $newBundle->name = $bundle->name . ' (Copy)';
             $newBundle->slug = Str::slug($newBundle->name) . '-' . time();
+            $newBundle->stock_quantity = 0; // Start with 0 stock
             $newBundle->views_count = 0;
             $newBundle->orders_count = 0;
 
@@ -197,9 +309,12 @@ class BundleService
 
             $newBundle->save();
 
-            // Copy product relationships
-            $productIds = $bundle->products->pluck('id')->toArray();
-            $newBundle->products()->attach($productIds);
+            // Copy product relationships with quantities
+            $syncData = [];
+            foreach ($bundle->products as $product) {
+                $syncData[$product->id] = ['quantity' => $product->pivot->quantity ?? 1];
+            }
+            $newBundle->products()->sync($syncData);
 
             return $newBundle->load('products');
         });
@@ -222,6 +337,44 @@ class BundleService
             'savings_amount' => $savingsAmount,
             'discount_percentage' => $bundle->discount_percentage,
             'average_price_per_product' => $productsCount > 0 ? $finalPrice / $productsCount : 0,
+            'stock_quantity' => $bundle->stock_quantity,
+            'actual_stock_quantity' => $bundle->actual_stock_quantity,
+            'stock_status' => $bundle->stock_status,
+            'limiting_products' => $bundle->getLimitingProducts()->map(function ($product) {
+                return [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'stock_quantity' => $product->stock_quantity,
+                    'required_quantity' => $product->pivot->quantity ?? 1,
+                ];
+            }),
+        ];
+    }
+
+    /**
+     * Check if bundle can be created with given quantity
+     */
+    public function canCreateWithQuantity(Bundle $bundle, int $quantity): array
+    {
+        $issues = [];
+
+        foreach ($bundle->products as $product) {
+            $requiredQuantity = ($product->pivot->quantity ?? 1) * $quantity;
+            
+            if ($product->stock_quantity < $requiredQuantity) {
+                $issues[] = [
+                    'product_id' => $product->id,
+                    'product_name' => $product->name,
+                    'required' => $requiredQuantity,
+                    'available' => $product->stock_quantity,
+                    'shortage' => $requiredQuantity - $product->stock_quantity,
+                ];
+            }
+        }
+
+        return [
+            'can_create' => empty($issues),
+            'issues' => $issues,
         ];
     }
 

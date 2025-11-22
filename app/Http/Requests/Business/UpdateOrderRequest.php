@@ -16,20 +16,20 @@ class UpdateOrderRequest extends FormRequest
         return [
             // Customer Information
             'customer_name' => 'sometimes|required|string|max:255',
-            'customer_email' => 'sometimes|required|email|max:255',
+            'customer_email' => 'nullable|email|max:255', 
             'customer_phone' => 'sometimes|required|string|max:20',
             'customer_address' => 'nullable|string|max:1000',
-            
+            'return_status' => 'nullable|in:pending,approved,rejected,completed',
             // Payment
             'payment_method' => 'nullable|string|max:50',
             'payment_status' => 'nullable|in:pending,paid,failed,refunded',
-            
+
             // Status
             'status' => 'nullable|in:pending,processing,shipped,delivered,cancelled,refunded',
-            
+
             // Shipping
             'tracking_number' => 'nullable|string|max:100',
-            
+
             // Notes
             'customer_notes' => 'nullable|string|max:2000',
             'admin_notes' => 'nullable|string|max:2000',

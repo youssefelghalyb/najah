@@ -84,8 +84,8 @@
                         <div>
                             <label for="price" class="block text-sm font-semibold text-gray-700 mb-2">Price *</label>
                             <div class="relative">
-                                <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-semibold">$</span>
-                                <input type="number" name="price" id="price" value="{{ old('price') }}" step="0.01" min="0" required class="w-full pl-8 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 @error('price') border-red-500 @enderror" onchange="calculateFinalPrice()">
+                                <span class="absolute left-4 top-1/2 -translate-y-1/2  text-gray-500 font-semibold">EGP</span>
+                                <input type="number" name="price" id="price" value="{{ old('price') }}" step="0.01" min="0" required class=" w-full pl-12 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 @error('price') border-red-500 @enderror" onchange="calculateFinalPrice()">
                             </div>
                             @error('price')
                                 <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
@@ -101,7 +101,7 @@
                             <div>
                                 <label for="discount_type" class="block text-sm font-semibold text-gray-700 mb-2">Type</label>
                                 <select name="discount_type" id="discount_type" class="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500" onchange="calculateFinalPrice()">
-                                    <option value="fixed" {{ old('discount_type', 'fixed') == 'fixed' ? 'selected' : '' }}>Fixed ($)</option>
+                                    <option value="fixed" {{ old('discount_type', 'fixed') == 'fixed' ? 'selected' : '' }}>Fixed (EGP)</option>
                                     <option value="percentage" {{ old('discount_type') == 'percentage' ? 'selected' : '' }}>Percentage (%)</option>
                                 </select>
                             </div>
@@ -111,7 +111,7 @@
                         <div class="bg-green-50 border border-green-200 rounded-xl p-4">
                             <div class="flex items-center justify-between">
                                 <span class="text-sm font-semibold text-green-900">Final Price:</span>
-                                <span class="text-2xl font-black text-green-600" id="finalPriceDisplay">$0.00</span>
+                                <span class="text-2xl font-black text-green-600" id="finalPriceDisplay">EGP0.00</span>
                             </div>
                         </div>
 
@@ -215,7 +215,7 @@
             }
             
             finalPrice = Math.max(0, finalPrice);
-            document.getElementById('finalPriceDisplay').textContent = '$' + finalPrice.toFixed(2);
+            document.getElementById('finalPriceDisplay').textContent = 'EGP' + finalPrice.toFixed(2);
         }
 
         // Preview image

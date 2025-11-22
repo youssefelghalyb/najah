@@ -34,14 +34,19 @@ class OrderController extends Controller
             $query->where('payment_status', $request->payment_status);
         }
 
+        // Filter by return status
+        if ($request->filled('return_status')) {
+            $query->where('return_status', $request->return_status);
+        }
+
         // Search
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('order_number', 'like', "%{$search}%")
-                  ->orWhere('customer_name', 'like', "%{$search}%")
-                  ->orWhere('customer_email', 'like', "%{$search}%")
-                  ->orWhere('customer_phone', 'like', "%{$search}%");
+                    ->orWhere('customer_name', 'like', "%{$search}%")
+                    ->orWhere('customer_email', 'like', "%{$search}%")
+                    ->orWhere('customer_phone', 'like', "%{$search}%");
             });
         }
 
@@ -52,9 +57,9 @@ class OrderController extends Controller
 
     public function create()
     {
-        $products = Product::active()->get();
-        $bundles = Bundle::active()->get();
-        
+        $products = Product::active()->inStock()->get();
+        $bundles = Bundle::active()->inStock()->get();
+
         return view('orders.create', compact('products', 'bundles'));
     }
 
@@ -65,7 +70,7 @@ class OrderController extends Controller
 
             return redirect()
                 ->route('orders.show', $order)
-                ->with('success', 'Order created successfully!');
+                ->with('success', 'Order created successfully! Stock has been deducted.');
         } catch (\Exception $e) {
             return back()
                 ->withInput()
@@ -76,7 +81,7 @@ class OrderController extends Controller
     public function show(Order $order)
     {
         $order->load(['items.qrCode', 'statusHistory.changedBy', 'processedBy']);
-        
+
         // Manually load products and bundles for each item based on type
         foreach ($order->items as $item) {
             if ($item->item_type === 'product') {
@@ -85,9 +90,9 @@ class OrderController extends Controller
                 $item->load('bundle');
             }
         }
-        
+
         $statistics = $this->orderService->getStatistics($order);
-        
+
         return view('orders.show', compact('order', 'statistics'));
     }
 
@@ -118,7 +123,7 @@ class OrderController extends Controller
 
             return redirect()
                 ->route('orders.index')
-                ->with('success', 'Order deleted successfully!');
+                ->with('success', 'Order deleted successfully! Stock has been returned.');
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to delete order: ' . $e->getMessage());
         }
@@ -227,5 +232,47 @@ class OrderController extends Controller
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Update return status
+     */
+    public function updateReturnStatus(Request $request, Order $order)
+    {
+        $request->validate([
+            'return_status' => 'required|in:pending,approved,rejected,completed',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            $this->orderService->updateReturnStatus($order, $request->return_status, $request->notes);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Return status updated successfully!' .
+                    ($request->return_status === 'completed' ? ' Stock has been returned to inventory.' : ''),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 400);
+        }
+    }
+
+    /**
+     * Show return management page
+     */
+    public function manageReturn(Order $order)
+    {
+        if (!$order->canChangeReturnStatus()) {
+            return redirect()
+                ->route('orders.show', $order)
+                ->with('error', 'Return status can only be managed for refunded orders.');
+        }
+
+        $order->load(['items', 'statusHistory']);
+
+        return view('orders.manage-return', compact('order'));
     }
 }

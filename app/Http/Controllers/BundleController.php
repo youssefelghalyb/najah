@@ -25,8 +25,14 @@ class BundleController extends Controller
             $query->where('status', $request->status);
         }
 
+
         if ($request->filled('is_featured')) {
             $query->where('is_featured', $request->is_featured);
+        }
+
+        if ($request->filled('stock_status')) {
+            // This would need a scope or raw query since it's computed
+            // For now, we'll filter after loading
         }
 
         if ($request->filled('search')) {
@@ -44,18 +50,45 @@ class BundleController extends Controller
 
     public function create()
     {
-        $products = Product::active()->get();
+        $products = Product::all();
         return view('bundles.create', compact('products'));
     }
 
     public function store(StoreBundleRequest $request)
     {
         try {
+            // Validate stock availability before creating
+            $tempBundle = new Bundle($request->only(['stock_quantity']));
+            $tempBundle->setRelation('products', collect($request->products)->map(function ($productData) {
+                $productId = is_array($productData) ? $productData['id'] : $productData;
+                $quantity = is_array($productData) ? ($productData['quantity'] ?? 1) : 1;
+                
+                $product = Product::find($productId);
+                $product->pivot = (object)['quantity' => $quantity];
+                return $product;
+            }));
+
+            $validation = $this->bundleService->canCreateWithQuantity(
+                $tempBundle, 
+                $request->stock_quantity ?? 0
+            );
+
+            if (!$validation['can_create']) {
+                $errorMessage = "Insufficient stock for the following products:\n";
+                foreach ($validation['issues'] as $issue) {
+                    $errorMessage .= "- {$issue['product_name']}: needs {$issue['required']}, only {$issue['available']} available\n";
+                }
+                
+                return back()
+                    ->withInput()
+                    ->with('error', $errorMessage);
+            }
+
             $bundle = $this->bundleService->create($request->validated());
 
             return redirect()
                 ->route('bundles.show', $bundle)
-                ->with('success', 'Bundle created successfully!');
+                ->with('success', 'Bundle created successfully! Product stocks have been adjusted.');
         } catch (\Exception $e) {
             return back()
                 ->withInput()
@@ -70,7 +103,10 @@ class BundleController extends Controller
         // Increment view count
         $this->bundleService->incrementViews($bundle);
         
-        return view('bundles.show', compact('bundle'));
+        // Get statistics including stock info
+        $statistics = $this->bundleService->getStatistics($bundle);
+        
+        return view('bundles.show', compact('bundle', 'statistics'));
     }
 
     public function edit(Bundle $bundle)
@@ -87,7 +123,7 @@ class BundleController extends Controller
 
             return redirect()
                 ->route('bundles.show', $bundle)
-                ->with('success', 'Bundle updated successfully!');
+                ->with('success', 'Bundle updated successfully! Product stocks have been adjusted.');
         } catch (\Exception $e) {
             return back()
                 ->withInput()
@@ -102,9 +138,35 @@ class BundleController extends Controller
 
             return redirect()
                 ->route('bundles.index')
-                ->with('success', 'Bundle deleted successfully!');
+                ->with('success', 'Bundle deleted successfully! Product stocks have been returned.');
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to delete bundle: ' . $e->getMessage());
+        }
+    }
+
+    public function updateStock(Request $request, Bundle $bundle)
+    {
+        $request->validate([
+            'quantity' => 'required|integer|min:0',
+        ]);
+
+        try {
+            $bundle = $this->bundleService->updateStock($bundle, $request->quantity);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bundle stock updated successfully!',
+                'data' => [
+                    'stock_quantity' => $bundle->stock_quantity,
+                    'actual_stock_quantity' => $bundle->actual_stock_quantity,
+                    'stock_status' => $bundle->stock_status,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update stock: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -141,7 +203,7 @@ class BundleController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => "{$count} bundles deleted successfully!",
+                'message' => "{$count} bundles deleted successfully! Product stocks have been returned.",
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -174,6 +236,8 @@ class BundleController extends Controller
         }
     }
 
+
+
     public function duplicate(Bundle $bundle)
     {
         try {
@@ -181,7 +245,7 @@ class BundleController extends Controller
 
             return redirect()
                 ->route('bundles.edit', $newBundle)
-                ->with('success', 'Bundle duplicated successfully! You can now edit the copy.');
+                ->with('success', 'Bundle duplicated successfully! You can now edit the copy. Note: Stock quantity is set to 0.');
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to duplicate bundle: ' . $e->getMessage());
         }
@@ -203,6 +267,30 @@ class BundleController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to get statistics: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Check stock availability for bundle quantity (API endpoint)
+     */
+    public function checkStock(Request $request, Bundle $bundle)
+    {
+        $request->validate([
+            'quantity' => 'required|integer|min:1',
+        ]);
+
+        try {
+            $validation = $this->bundleService->canCreateWithQuantity($bundle, $request->quantity);
+
+            return response()->json([
+                'success' => true,
+                'data' => $validation,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to check stock: ' . $e->getMessage(),
             ], 500);
         }
     }

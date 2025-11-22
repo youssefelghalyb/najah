@@ -7,6 +7,7 @@ use App\Services\QrCodeService;
 use App\Http\Requests\StoreQrCodeRequest;
 use App\Http\Requests\BulkGenerateQrCodeRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 
 class QrCodeController extends Controller
@@ -205,6 +206,7 @@ class QrCodeController extends Controller
     {
         $qrCode = QrCode::where('uuid', $uuid)->firstOrFail();
         $qrCode->incrementScanCount();
+        dd($qrCode);
 
         if (!$qrCode->isActive()) {
             return view('qr-codes.expired', compact('qrCode'));
@@ -223,5 +225,57 @@ class QrCodeController extends Controller
             'status' => $newStatus,
             'message' => "QR code {$newStatus}!",
         ]);
+    }
+    /**
+     * Link QR code to existing profile via another QR code
+     */
+    public function linkProfile(Request $request, QrCode $qrCode)
+    {
+        $request->validate([
+            'profile_qr_code' => 'required|string|size:5|exists:qr_codes,code',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        try {
+            // Find the QR code that has the profile
+            $profileQrCode = QrCode::where('code', $request->profile_qr_code)->firstOrFail();
+
+            // Get the profile
+            $profile = $profileQrCode->getLinkedProfile();
+
+            if (!$profile) {
+                return back()->with('error', 'The QR code you entered does not have a profile linked.');
+            }
+
+            // Check if current QR already has a profile
+            if ($qrCode->hasProfile()) {
+                return back()->with('error', 'This QR code is already linked to a profile.');
+            }
+
+            // Link the profile to this QR code
+            $qrCode->linkToProfile($profile->id, Auth::id(), $request->notes);
+
+            return back()->with('success', 'Profile linked successfully!');
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to link profile: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Unlink profile from QR code
+     */
+    public function unlinkProfile(QrCode $qrCode)
+    {
+        try {
+            if (!$qrCode->hasProfile()) {
+                return back()->with('error', 'This QR code does not have a profile linked.');
+            }
+
+            $qrCode->unlinkFromProfile();
+
+            return back()->with('success', 'Profile unlinked successfully!');
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to unlink profile: ' . $e->getMessage());
+        }
     }
 }

@@ -31,6 +31,7 @@ class Order extends Model
         'delivered_at',
         'processed_by',
         'processed_at',
+        'return_status',
     ];
 
     protected $casts = [
@@ -38,6 +39,7 @@ class Order extends Model
         'discount_amount' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'shipping_amount' => 'decimal:2',
+        'return_status' => 'string',
         'total' => 'decimal:2',
         'shipped_at' => 'datetime',
         'delivered_at' => 'datetime',
@@ -183,5 +185,49 @@ class Order extends Model
         $sequence = $lastOrder ? intval(substr($lastOrder->order_number, -4)) + 1 : 1;
 
         return 'ORD-' . $date . '-' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+    }
+    /**
+     * Check if return is pending
+     */
+    public function hasPendingReturn(): bool
+    {
+        return $this->status === 'refunded' && in_array($this->return_status, ['pending', 'approved']);
+    }
+
+    /**
+     * Check if return is completed
+     */
+    public function isReturnCompleted(): bool
+    {
+        return $this->return_status === 'completed';
+    }
+
+    /**
+     * Can change return status
+     */
+    public function canChangeReturnStatus(): bool
+    {
+        return $this->status === 'refunded';
+    }
+
+    /**
+     * Get return status badge class
+     */
+    public function getReturnStatusBadgeClassAttribute()
+    {
+        return [
+            'pending' => 'bg-yellow-100 text-yellow-800',
+            'approved' => 'bg-blue-100 text-blue-800',
+            'rejected' => 'bg-red-100 text-red-800',
+            'completed' => 'bg-green-100 text-green-800',
+        ][$this->return_status] ?? 'bg-gray-100 text-gray-800';
+    }
+
+    /**
+     * Get return status label
+     */
+    public function getReturnStatusLabelAttribute()
+    {
+        return $this->return_status ? ucfirst($this->return_status) : 'N/A';
     }
 }

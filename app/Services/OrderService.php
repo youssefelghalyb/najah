@@ -22,17 +22,16 @@ class OrderService
             // Calculate pricing
             $items = $data['items'];
             $subtotal = $this->calculateSubtotal($items);
-            
+
             $discountAmount = $data['discount_amount'] ?? 0;
             $taxAmount = $data['tax_amount'] ?? 0;
             $shippingAmount = $data['shipping_amount'] ?? 0;
-            
-            $total = $subtotal - $discountAmount + $taxAmount + $shippingAmount;
 
+            $total = $subtotal - $discountAmount + $taxAmount + $shippingAmount;
             // Create order
             $order = Order::create([
                 'customer_name' => $data['customer_name'],
-                'customer_email' => $data['customer_email'],
+                'customer_email' => $data['customer_email'] ?? null,
                 'customer_phone' => $data['customer_phone'],
                 'customer_address' => $data['customer_address'] ?? null,
                 'subtotal' => $subtotal,
@@ -47,9 +46,10 @@ class OrderService
                 'admin_notes' => $data['admin_notes'] ?? null,
             ]);
 
-            // Create order items
+            // Create order items and deduct stock
             foreach ($items as $item) {
                 $this->createOrderItem($order, $item);
+                $this->deductStock($item['item_type'], $item['item_id'], $item['quantity']);
             }
 
             // Log initial status
@@ -97,6 +97,13 @@ class OrderService
     public function delete(Order $order): bool
     {
         return DB::transaction(function () use ($order) {
+            // Return stock if order is being deleted (pending or processing orders only)
+            if (in_array($order->status, ['pending', 'processing'])) {
+                foreach ($order->items as $item) {
+                    $this->returnStock($item->item_type, $item->item_id, $item->quantity);
+                }
+            }
+
             // Unassign all QR codes
             foreach ($order->items as $item) {
                 if ($item->qr_code_id) {
@@ -109,38 +116,114 @@ class OrderService
     }
 
     /**
-     * Assign QR codes to order items
+     * Deduct stock when order is created
      */
-    public function assignQRCodes(Order $order, array $assignments): Order
+    private function deductStock(string $itemType, int $itemId, int $quantity): void
     {
-        return DB::transaction(function () use ($order, $assignments) {
-            foreach ($assignments as $assignment) {
-                $orderItem = OrderItem::find($assignment['order_item_id']);
-                $qrCode = QrCode::find($assignment['qr_code_id']);
+        if ($itemType === 'product') {
+            $product = Product::findOrFail($itemId);
 
-                if ($orderItem && $qrCode && $orderItem->order_id === $order->id) {
-                    // Check if QR code is available
-                    if ($qrCode->status !== 'active') {
-                        throw new \Exception("QR Code {$qrCode->code} is not active.");
-                    }
-
-                    // Check if QR already assigned to another order item
-                    $existingAssignment = OrderItem::where('qr_code_id', $qrCode->id)
-                        ->where('id', '!=', $orderItem->id)
-                        ->first();
-
-                    if ($existingAssignment) {
-                        throw new \Exception("QR Code {$qrCode->code} is already assigned to another order.");
-                    }
-
-                    // Assign QR code
-                    $orderItem->assignQRCode($qrCode->id);
-                }
+            if ($product->stock_quantity < $quantity) {
+                throw new \Exception("Insufficient stock for product '{$product->name}'. Available: {$product->stock_quantity}, Required: {$quantity}");
             }
 
-            return $order->fresh(['items', 'items.qrCode']);
-        });
+            $product->decrement('stock_quantity', $quantity);
+            $product->updateStockStatus();
+            $product->save();
+        } elseif ($itemType === 'bundle') {
+            $bundle = Bundle::findOrFail($itemId);
+
+            if ($bundle->stock_quantity < $quantity) {
+                throw new \Exception("Insufficient stock for bundle '{$bundle->name}'. Available: {$bundle->stock_quantity}, Required: {$quantity}");
+            }
+
+            // Only decrement bundle quantity, NOT products
+            $bundle->decrement('stock_quantity', $quantity);
+        }
     }
+
+    /**
+     * Return stock when order is cancelled/refunded or return is completed
+     */
+    private function returnStock(string $itemType, int $itemId, int $quantity): void
+    {
+        if ($itemType === 'product') {
+            $product = Product::find($itemId);
+            if ($product) {
+                $product->increment('stock_quantity', $quantity);
+                $product->updateStockStatus();
+                $product->save();
+            }
+        } elseif ($itemType === 'bundle') {
+            $bundle = Bundle::find($itemId);
+            if ($bundle) {
+                // Only increment bundle quantity, NOT products
+                $bundle->increment('stock_quantity', $quantity);
+            }
+        }
+    }
+
+    /**
+     * Assign QR codes to order items
+     */
+public function assignQRCodes(Order $order, array $assignments): Order
+{
+    return DB::transaction(function () use ($order, $assignments) {
+        foreach ($assignments as $assignment) {
+            // Skip if no QR code provided
+            if (empty($assignment['qr_code']) && empty($assignment['qr_code_id'])) {
+                continue;
+            }
+
+            $orderItem = OrderItem::find($assignment['order_item_id']);
+            
+            // Find QR code by code or ID
+            if (!empty($assignment['qr_code'])) {
+                $qrCode = QrCode::where('code', $assignment['qr_code'])->first();
+            } else {
+                $qrCode = QrCode::find($assignment['qr_code_id']);
+            }
+
+            if (!$qrCode) {
+                throw new \Exception("QR Code not found: " . ($assignment['qr_code'] ?? $assignment['qr_code_id']));
+            }
+
+            if ($orderItem && $orderItem->order_id === $order->id) {
+                // Check if QR code is active
+                if ($qrCode->status !== 'active') {
+                    throw new \Exception("QR Code {$qrCode->code} is not active.");
+                }
+
+                // Check if QR code is expired
+                if ($qrCode->isExpired()) {
+                    throw new \Exception("QR Code {$qrCode->code} has expired.");
+                }
+
+                // Check if QR already assigned to another order item
+                $existingAssignment = OrderItem::where('qr_code_id', $qrCode->id)
+                    ->where('id', '!=', $orderItem->id)
+                    ->first();
+
+                if ($existingAssignment) {
+                    $existingOrder = $existingAssignment->order;
+                    throw new \Exception("QR Code {$qrCode->code} is already assigned to Order #{$existingOrder->order_number}.");
+                }
+
+                // If reassigning, unassign old QR code first
+                if (isset($assignment['reassign']) && $assignment['reassign']) {
+                    if ($orderItem->qr_code_id) {
+                        $orderItem->unassignQRCode();
+                    }
+                }
+
+                // Assign QR code
+                $orderItem->assignQRCode($qrCode->id);
+            }
+        }
+
+        return $order->fresh(['items', 'items.qrCode']);
+    });
+}
 
     /**
      * Unassign QR code from order item
@@ -163,6 +246,11 @@ class OrderService
 
             // Update order
             $updateData = ['status' => $newStatus];
+
+            // If changing to refunded, initialize return_status to pending
+            if ($newStatus === 'refunded' && !$order->return_status) {
+                $updateData['return_status'] = 'pending';
+            }
 
             // Set processed_at when moving to processing
             if ($newStatus === 'processing' && !$order->processed_at) {
@@ -194,16 +282,53 @@ class OrderService
      */
     public function updatePaymentStatus(Order $order, string $paymentStatus): Order
     {
+        $oldPaymentStatus = $order->payment_status;
+
         $order->update(['payment_status' => $paymentStatus]);
-        
+
         $this->logStatusChange(
-            $order, 
-            $order->payment_status, 
-            $paymentStatus, 
-            "Payment status updated"
+            $order,
+            $oldPaymentStatus,
+            $paymentStatus,
+            "Payment status updated from {$oldPaymentStatus} to {$paymentStatus}"
         );
 
         return $order->fresh();
+    }
+
+    /**
+     * Update return status and handle stock return
+     */
+    public function updateReturnStatus(Order $order, string $returnStatus, ?string $notes = null): Order
+    {
+        return DB::transaction(function () use ($order, $returnStatus, $notes) {
+            // Validate order is refunded
+            if ($order->status !== 'refunded') {
+                throw new \Exception('Return status can only be changed for refunded orders.');
+            }
+
+            $oldReturnStatus = $order->return_status;
+
+            // Update return status
+            $order->update(['return_status' => $returnStatus]);
+
+            // If return is completed, return stock to inventory
+            if ($returnStatus === 'completed' && $oldReturnStatus !== 'completed') {
+                foreach ($order->items as $item) {
+                    $this->returnStock($item->item_type, $item->item_id, $item->quantity);
+                }
+            }
+
+            // Log the change
+            $this->logStatusChange(
+                $order,
+                $oldReturnStatus ?? 'none',
+                $returnStatus,
+                $notes ?? "Return status changed from " . ($oldReturnStatus ?? 'none') . " to {$returnStatus}"
+            );
+
+            return $order->fresh();
+        });
     }
 
     /**
@@ -217,7 +342,7 @@ class OrderService
             if ($item['item_type'] === 'product') {
                 $product = Product::find($item['item_id']);
                 if ($product) {
-                    $subtotal += $product->price * $item['quantity'];
+                    $subtotal += $product->final_price * $item['quantity'];
                 }
             } elseif ($item['item_type'] === 'bundle') {
                 $bundle = Bundle::find($item['item_id']);
@@ -244,7 +369,7 @@ class OrderService
             $product = Product::findOrFail($itemId);
             $itemName = $product->name;
             $itemDescription = $product->description;
-            $unitPrice = $product->price;
+            $unitPrice = $product->final_price;
         } else { // bundle
             $bundle = Bundle::findOrFail($itemId);
             $itemName = $bundle->name;
@@ -299,7 +424,7 @@ class OrderService
             throw new \Exception('Cannot move to processing: Order payment is not completed.');
         }
 
-        // Can't move backwards
+        // Can't move backwards (except to cancelled/refunded)
         $statusOrder = ['pending', 'processing', 'shipped', 'delivered'];
         $currentIndex = array_search($currentStatus, $statusOrder);
         $newIndex = array_search($newStatus, $statusOrder);
@@ -334,6 +459,9 @@ class OrderService
             'pending_qr_codes' => $order->getTotalItemsCount() - $order->getAssignedQRCodesCount(),
             'all_qr_assigned' => $order->hasAllQRCodesAssigned(),
             'can_process' => $order->canAssignQRCodes(),
+            'has_pending_return' => $order->hasPendingReturn(),
+            'is_return_completed' => $order->isReturnCompleted(),
+            'can_change_return_status' => $order->canChangeReturnStatus(),
         ];
     }
 }

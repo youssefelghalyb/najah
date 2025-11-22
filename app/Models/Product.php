@@ -21,6 +21,7 @@ class Product extends Model
         'discount_type',
         'final_price',
         'stock_quantity',
+        'is_visible',
         'stock_status',
         'low_stock_threshold',
         'status',
@@ -37,6 +38,7 @@ class Product extends Model
         'discount_amount' => 'decimal:2',
         'final_price' => 'decimal:2',
         'stock_quantity' => 'integer',
+        'is_visible' => 'boolean',
         'low_stock_threshold' => 'integer',
         'views_count' => 'integer',
         'orders_count' => 'integer',
@@ -152,6 +154,14 @@ class Product extends Model
     }
 
     /**
+     * Check if product is visible
+     */
+    public function isVisible(): bool
+    {
+        return $this->is_visible;
+    }
+
+    /**
      * Increment views count
      */
     public function incrementViews(): void
@@ -178,7 +188,7 @@ class Product extends Model
     public function bundles()
     {
         return $this->belongsToMany(Bundle::class, 'bundle_product')
-            ->withPivot('quantity', 'price_at_time')
+            ->withPivot('quantity')
             ->withTimestamps();
     }
 
@@ -188,6 +198,14 @@ class Product extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active');
+    }
+
+    /**
+     * Scope for visible products
+     */
+    public function scopeVisible($query)
+    {
+        return $query->where('is_visible', true);
     }
 
     /**

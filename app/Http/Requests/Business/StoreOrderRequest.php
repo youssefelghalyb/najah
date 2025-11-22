@@ -16,25 +16,26 @@ class StoreOrderRequest extends FormRequest
         return [
             // Customer Information
             'customer_name' => 'required|string|max:255',
-            'customer_email' => 'required|email|max:255',
+            'customer_email' => 'nullable|email|max:255',
+
             'customer_phone' => 'required|string|max:20',
             'customer_address' => 'nullable|string|max:1000',
-            
+
             // Order Items
             'items' => 'required|array|min:1',
             'items.*.item_type' => 'required|in:product,bundle',
             'items.*.item_id' => 'required|integer',
             'items.*.quantity' => 'required|integer|min:1',
-            
+
             // Pricing (optional, can be calculated)
             'discount_amount' => 'nullable|numeric|min:0',
             'tax_amount' => 'nullable|numeric|min:0',
             'shipping_amount' => 'nullable|numeric|min:0',
-            
+
             // Payment
             'payment_method' => 'nullable|string|max:50',
             'payment_status' => 'nullable|in:pending,paid,failed',
-            
+
             // Notes
             'customer_notes' => 'nullable|string|max:2000',
             'admin_notes' => 'nullable|string|max:2000',
@@ -50,6 +51,7 @@ class StoreOrderRequest extends FormRequest
             'customer_phone.required' => 'Customer phone number is required.',
             'items.required' => 'Please add at least one item to the order.',
             'items.min' => 'Order must contain at least one item.',
+
             'items.*.item_type.required' => 'Item type is required.',
             'items.*.item_type.in' => 'Item type must be either product or bundle.',
             'items.*.item_id.required' => 'Item ID is required.',
@@ -71,11 +73,11 @@ class StoreOrderRequest extends FormRequest
         if (!$this->discount_amount) {
             $this->merge(['discount_amount' => 0]);
         }
-        
+
         if (!$this->tax_amount) {
             $this->merge(['tax_amount' => 0]);
         }
-        
+
         if (!$this->shipping_amount) {
             $this->merge(['shipping_amount' => 0]);
         }

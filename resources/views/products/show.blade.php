@@ -111,7 +111,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div>
                             <p class="text-sm text-gray-600 mb-1">Base Price</p>
-                            <p class="text-2xl font-black text-gray-900">${{ number_format($product->price, 2) }}</p>
+                            <p class="text-2xl font-black text-gray-900">EGP{{ number_format($product->price, 2) }}</p>
                         </div>
 
                         @if($product->hasDiscount())
@@ -121,7 +121,7 @@
                                     @if($product->discount_type === 'percentage')
                                         {{ $product->discount_amount }}%
                                     @else
-                                        ${{ number_format($product->discount_amount, 2) }}
+                                        EGP{{ number_format($product->discount_amount, 2) }}
                                     @endif
                                 </p>
                             </div>
@@ -129,7 +129,7 @@
 
                         <div class="md:col-span-{{ $product->hasDiscount() ? '1' : '2' }}">
                             <p class="text-sm text-gray-600 mb-1">Final Price</p>
-                            <p class="text-3xl font-black text-green-600">${{ number_format($product->final_price, 2) }}</p>
+                            <p class="text-3xl font-black text-green-600">EGP{{ number_format($product->final_price, 2) }}</p>
                             @if($product->hasDiscount())
                                 <p class="text-sm text-green-600 font-semibold mt-1">Save {{ number_format($product->discount_percentage) }}%</p>
                             @endif
